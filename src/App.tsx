@@ -59,9 +59,12 @@ const [streams, setStreams] = useState<Array<{
 }>>([]);
 const videoRef = useRef<HTMLVideoElement>(null);
 const nextPersonSenderId = useRef<string>("");
+const socketIdRef = useRef<string>("");
 const nextPersonId = useRef<string>("");
+const streamSenderId = useRef<string>("");
 
 const mainStream = useRef<MediaStream>();
+const streamRef = useRef<any>();
  useEffect(() => {
     if (streams.length > 0) {
       const lastStream: any = streams[streams.length - 1];
@@ -69,11 +72,12 @@ const mainStream = useRef<MediaStream>();
         lastStream.ref.current.srcObject = lastStream.vid;
         lastStream.ref.current.play();
       }
+      streamRef.current = streams;
     }
     
   }, [streams]);
 const createStream = async () => {
-  const stream = await navigator.mediaDevices.getUserMedia({ audio:  true, video: true});
+  const stream = await navigator.mediaDevices.getUserMedia({ audio:  false, video: true});
   mainStream.current = stream;
     const refObject = {...videoRef}
    setStreams(prev => [...prev, {
@@ -123,6 +127,7 @@ const setTracks = useCallback(() => {
   }
 }, []);
 const makePeerConnections = async  (ids: [string]) => {
+  nextPersonSenderId.current = "";
    Pcs.current.push({id: ids[idx.current], pc: new Peer()});
   nextPersonId.current = ids[idx.current];
     await createLocalOffer(ids[idx.current]);
@@ -130,6 +135,7 @@ const makePeerConnections = async  (ids: [string]) => {
   useEffect(() => {
     socketInstance.on("on-connected", (id: string) => {
       setSocketId(id);
+      socketIdRef.current = id;
       createStream();
     });
     
@@ -147,6 +153,7 @@ const makePeerConnections = async  (ids: [string]) => {
       offer: any, socketId: string
     }) => {
       Pcs.current.push({id: socketId, pc: new Peer()});
+      streamSenderId.current = socketId;
       const anwser = await Pcs.current[Pcs.current.length - 1].pc.connectRemoteOffer(offer);
       console.log("recived remote offer: ", offer)
       socketInstance.emit("send-anwser", {anwser, socketId});
@@ -156,6 +163,7 @@ const makePeerConnections = async  (ids: [string]) => {
     socketInstance.on("get-remote-anwser", async ({anwser, socketId}: {
       anwser:  any, socketId: string }) => {
         console.log("recived anwser:  ", socketId, anwser);
+        streamSenderId.current = socketId;
        await  Pcs.current[Pcs.current.length - 1].pc.setRemoteDescription(anwser);
       Pcs.current[Pcs.current.length - 1].pc.peer.addEventListener("track", getTracks);
         Pcs.current[Pcs.current.length - 1].pc.peer.addEventListener("negotiationneeded", makeNegotiation);
@@ -170,9 +178,18 @@ const makePeerConnections = async  (ids: [string]) => {
     });
 
     socketInstance.on("send-track", (socketId: string) => {
-      console.log("I may need to send tracks??🙄");
+      console.log("I may need to send tracks??🙄: ", socketId);
       nextPersonSenderId.current = socketId;
       setTracks();
+      if (idx.current + 1 !== idsRef.current.length && connecting.current) {
+        console.log("FINALLY ERRORRRRROROROROROROROR S0LVED::::!!!!")
+        idx.current++;
+        if(idsRef.current[idx.current] === socketIdRef.current) return connecting.current = false;
+        console.log("i got you bro: ", idsRef.current[idx.current], socketIdRef.current);
+        makePeerConnections(idsRef.current); 
+      }else {
+        connecting.current = false;
+      }
     })
   socketInstance.on("set-negotiation-offer", async ({offer, socketId}) => {
     console.log("recived negotiation offer: ", offer, socketId);
@@ -181,6 +198,7 @@ const makePeerConnections = async  (ids: [string]) => {
   });
     socketInstance.on("on-someone-disconnects", (socketId) => {
       removeTracks(socketId);
+      console.log("socket stream: ", streamRef.current);
        setStreams((prev) =>
           prev.filter((stream) => stream.socketId !== socketId)
         );
@@ -202,15 +220,10 @@ const makePeerConnections = async  (ids: [string]) => {
      const refObject = {...videoRef}
     setStreams(prev => [...prev,  {
       vid: media,
-      socketId: nextPersonId.current,
+      socketId: streamSenderId.current,
       ref: refObject
     }]);
-    if (idx.current + 1 !== idsRef.current.length && connecting.current) {
-      idx.current++;
-      makePeerConnections(idsRef.current); 
-    }else {
-      connecting.current = false;
-    }
+   
   }, []);
   const makeNegotiation = useCallback(async () => {
     console.log("negotiation needed: ", !nextPersonSenderId.current ? nextPersonId.current : nextPersonSenderId.current);
